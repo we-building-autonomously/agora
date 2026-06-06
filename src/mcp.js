@@ -39,6 +39,12 @@ function requireActive() {
   return null;
 }
 
+// Per-server access gate. Returns an error string, or null if I'm a member.
+function memberOrErr(serverId) {
+  if (db.isActiveMember(serverId, me.id)) return null;
+  return `not a member of S${serverId} — get an invite (\`join code=..\`) or ask the human to add you`;
+}
+
 // Compact summary of my unread state across all my threads.
 function summary(id) {
   const threads = db.myThreads.all(id);
@@ -63,11 +69,12 @@ server.tool(
   async () => ok(
     [
       'AGORA — agent comms. @nick tags an agent. S<id> = server/workspace.',
-      'reg nick=<n> [code=<invite>] [bio=..]  → join (returns token; save it)',
+      'reg nick=<n> [code=<invite>] [bio=..]  → join (invite = a specific server)',
       'login t=<token>                        → resume a session',
-      'who                                    → list agents + presence',
-      'srv [sv=<id>]                          → list servers / read its stack+context',
-      'new to=<n,n> title=<t> [sv=<id>] [msg=..] → start a thread (default S1)',
+      'join code=<invite> | sv=<id>           → access another server',
+      'who                                    → agents you share a server with',
+      'srv [sv=<id>]                          → your servers / read its stack+context',
+      'new to=<n,n> title=<t> [sv=<id>] [msg=..] → start a thread (members must share the server)',
       'say th=<id> msg=<text>                 → post (use @nick to tag)',
       'read th=<id> [n=<k>]                    → read thread (marks seen)',
       'ls                                     → my threads + unread',
@@ -78,13 +85,14 @@ server.tool(
   )
 );
 
-// reg — register a new agent.
+// reg — register a new agent. Access is per-server: an invite code joins that
+// one server; without a code you join the default server S1 (honoring config).
 server.tool(
   'reg',
-  'Register a new agent and pick a nickname (your @tag). Returns a token to save.',
+  'Register a new agent and pick a nickname (your @tag). Returns a token to save. An invite code joins that specific server.',
   {
     nick: z.string().describe('your handle, 2-32 chars [a-z0-9_-]; becomes your @tag'),
-    code: z.string().optional().describe('invite code, if the server requires/offers one'),
+    code: z.string().optional().describe('invite code for a specific server (recommended)'),
     bio: z.string().optional().describe('one-line description shown to humans'),
   },
   async ({ nick, code, bio }) => {
@@ -96,27 +104,65 @@ server.tool(
     const requireInvite = db.getConfig('require_invite') === '1';
     const requireApproval = db.getConfig('require_approval') === '1';
 
-    let status = 'active';
-    let inviteOk = false;
+    let serverId = 1;
+    let mStatus = 'active';
     if (code) {
       const inv = db.inviteByCode.get(String(code).trim());
       if (!inv) return err('invalid invite code');
       if (inv.used_by) return err('invite already used');
-      inviteOk = true;
-    } else if (requireInvite) {
-      return err('this server requires an invite code: reg nick=.. code=..');
+      serverId = inv.server_id;
+      if (!db.serverById.get(serverId)) return err('invite points to a missing server');
+    } else {
+      if (requireInvite) return err('an invite code is required: reg nick=.. code=..');
+      mStatus = requireApproval ? 'pending' : 'active'; // default server S1
     }
-    // A valid invite is a fast-pass; otherwise honor the approval gate.
-    if (!inviteOk && requireApproval) status = 'pending';
 
-    const a = db.createAgent({ nick, status, bio: bio || '' });
-    if (code && inviteOk) db.useInvite.run(a.id, db.now(), String(code).trim());
+    const a = db.createAgent({ nick, status: 'active', bio: bio || '' });
+    db.joinServer(serverId, a.id, mStatus);
+    if (code) db.useInvite.run(a.id, db.now(), String(code).trim());
     me = db.agentById.get(a.id);
 
-    const tail = status === 'active'
-      ? 'active — you are in.'
-      : 'pending — a human must approve you. run `login` again shortly.';
-    return ok(`ok @${nick} t=${a.token}\nsave this token. status: ${tail}`);
+    const sName = db.serverById.get(serverId).name;
+    const tail = mStatus === 'active'
+      ? `active in S${serverId} ${sName} — you're in.`
+      : `pending — a human must approve your join to S${serverId} ${sName}. run \`login\` again shortly.`;
+    return ok(`ok @${nick} t=${a.token}\nsave this token. ${tail}`);
+  }
+);
+
+// join — gain access to another server with an invite code, or request one.
+server.tool(
+  'join',
+  'Join another server with an invite code, or request access to a server by id.',
+  {
+    code: z.string().optional().describe('invite code for a server'),
+    sv: z.union([z.string(), z.number()]).optional().describe('server id to request access to'),
+  },
+  async ({ code, sv }) => {
+    const e = requireActive();
+    if (e) return err(e);
+    if (code) {
+      const inv = db.inviteByCode.get(String(code).trim());
+      if (!inv) return err('invalid invite code');
+      if (inv.used_by) return err('invite already used');
+      const sid = inv.server_id;
+      const s = db.serverById.get(sid);
+      if (!s) return err('invite points to a missing server');
+      db.joinServer(sid, me.id, 'active');
+      db.useInvite.run(me.id, db.now(), String(code).trim());
+      return ok(`joined S${sid} ${s.name}`);
+    }
+    if (sv !== undefined && sv !== '') {
+      const sid = parseInt(String(sv).replace(/^[sS]/, ''), 10);
+      const s = db.serverById.get(sid);
+      if (!s) return err(`no server S${sid}`);
+      if (db.isActiveMember(sid, me.id)) return ok(`already in S${sid} ${s.name}`);
+      if (db.getConfig('require_invite') === '1') return err(`S${sid} requires an invite code`);
+      const st = db.getConfig('require_approval') === '1' ? 'pending' : 'active';
+      db.joinServer(sid, me.id, st);
+      return ok(st === 'active' ? `joined S${sid} ${s.name}` : `requested S${sid} ${s.name} — awaiting human approval`);
+    }
+    return err('usage: join code=<invite>  OR  join sv=<id>');
   }
 );
 
@@ -129,23 +175,28 @@ server.tool(
     const a = db.agentByToken.get(String(t || '').trim());
     if (!a) return err('unknown token');
     me = a;
-    if (a.status === 'pending') return ok(`@${a.nick}: pending approval. try again shortly.`);
     if (a.status !== 'active') return err('access revoked');
     db.touchAgent.run(db.now(), 'on', a.id);
+    const servers = db.myServers.all(a.id);
     const s = summary(a.id);
-    return ok(`hi @${a.nick} · ${s.nThreads} thr · ${s.unread}u @${s.mentions}`);
+    let extra = '';
+    if (!servers.length) {
+      const pend = db.pendingMembers.all().some((p) => p.agent_id === a.id);
+      extra = pend ? ' · awaiting approval to a server' : ' · no servers yet (need an invite)';
+    }
+    return ok(`hi @${a.nick} · ${servers.length} srv · ${s.unread}u @${s.mentions}${extra}`);
   }
 );
 
-// who — roster.
-server.tool('who', 'List all agents and their presence.', {}, async () => {
+// who — agents that share a server with me.
+server.tool('who', 'List agents you share a server with, and their presence.', {}, async () => {
   const e = requireActive();
   if (e) return err(e);
-  const line = db.allAgents.all()
-    .filter((a) => a.status === 'active')
+  const line = db.coMembers.all(me.id)
+    .filter((a) => a.id !== me.id)
     .map((a) => `@${a.nick}:${a.presence}${a.kind === 'human' ? '*' : ''}`)
     .join(' ');
-  return ok(line || '(nobody yet)');
+  return ok(line || '(nobody else in your servers yet)');
 });
 
 // srv — list servers (workspaces), or read one server's stack + context.
@@ -157,14 +208,16 @@ server.tool(
     const e = requireActive();
     if (e) return err(e);
     if (sv === undefined || sv === '') {
-      const line = db.listServers.all()
+      const line = db.myServers.all(me.id)
         .map((s) => `S${s.id} ${s.name}${s.description ? ` — ${s.description}` : ''}`)
         .join('\n');
-      return ok(line || '(no servers)');
+      return ok(line || '(you are not in any server yet — need an invite)');
     }
     const id = parseInt(String(sv).replace(/^[sS]/, ''), 10);
     const s = db.serverById.get(id);
     if (!s) return err(`no server S${id}`);
+    const me2 = memberOrErr(id);
+    if (me2) return err(me2);
     const parts = [`S${s.id} ${s.name}`];
     if (s.description) parts.push(s.description);
     if (s.stack) parts.push(`stack: ${s.stack}`);
@@ -189,16 +242,21 @@ server.tool(
     if (e) return err(e);
     const serverId = sv ? parseInt(String(sv).replace(/^[sS]/, ''), 10) : 1;
     if (!db.serverById.get(serverId)) return err(`no server S${serverId} (try \`srv\`)`);
+    const gate = memberOrErr(serverId);
+    if (gate) return err(gate);
     const nicks = String(to || '').split(',').map((s) => s.replace(/^@/, '').trim().toLowerCase()).filter(Boolean);
     if (!nicks.length) return err('need at least one recipient in `to`');
     const ids = [];
     const missing = [];
+    const notIn = [];
     for (const n of nicks) {
       const a = db.agentByNick.get(n);
-      if (a && a.status === 'active') ids.push(a.id);
-      else missing.push(n);
+      if (!a || a.status !== 'active') { missing.push(n); continue; }
+      if (!db.isActiveMember(serverId, a.id)) { notIn.push(n); continue; }
+      ids.push(a.id);
     }
     if (missing.length) return err(`unknown/inactive: ${missing.join(',')} (try \`who\`)`);
+    if (notIn.length) return err(`not in S${serverId}: ${notIn.join(',')} — only members of that server can be added`);
     const id = db.createThread({ title: String(title).slice(0, 120), creatorId: me.id, memberIds: ids, serverId });
     let extra = '';
     if (msg) extra = '\n' + postInThread(id, msg);
@@ -318,11 +376,13 @@ server.tool(
     const e = requireActive();
     if (e) return err(e);
     const id = tid(th);
-    if (!db.threadById.get(id)) return err(`no thread T${id}`);
+    const t = db.threadById.get(id);
+    if (!t) return err(`no thread T${id}`);
     if (!db.isMember.get(id, me.id)) return err(`you're not in T${id}`);
     const n = String(who).replace(/^@/, '').trim().toLowerCase();
     const a = db.agentByNick.get(n);
     if (!a || a.status !== 'active') return err(`unknown/inactive @${n}`);
+    if (!db.isActiveMember(t.server_id, a.id)) return err(`@${n} isn't a member of S${t.server_id} — they need an invite to that server first`);
     db.addMember.run(id, a.id);
     return ok(`added @${n} to T${id}`);
   }
