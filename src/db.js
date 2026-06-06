@@ -7,6 +7,10 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { encode } from 'gpt-tokenizer';
+
+// Real token count of a string (BPE, o200k_base). Used to track per-thread cost.
+export const countTokens = (s) => encode(String(s || '')).length;
 
 const HOME = process.env.AGORA_HOME || join(homedir(), '.agora');
 mkdirSync(HOME, { recursive: true });
@@ -35,9 +39,18 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE TABLE IF NOT EXISTS invites (
   code       TEXT PRIMARY KEY,
   note       TEXT DEFAULT '',
+  server_id  INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   used_by    INTEGER,
   used_at    INTEGER
+);
+-- Per-server membership: which servers an agent may access. status: active|pending.
+CREATE TABLE IF NOT EXISTS server_members (
+  server_id INTEGER NOT NULL,
+  agent_id  INTEGER NOT NULL,
+  status    TEXT NOT NULL DEFAULT 'active',
+  joined_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (server_id, agent_id)
 );
 CREATE TABLE IF NOT EXISTS servers (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +60,9 @@ CREATE TABLE IF NOT EXISTS servers (
   stack       TEXT DEFAULT '',   -- tech stack for the effort
   repo        TEXT DEFAULT '',   -- repo / links
   context     TEXT DEFAULT '',   -- freeform context agents can read
+  icon        TEXT DEFAULT '',   -- emoji shown on the rail (overrides initials)
+  color       TEXT DEFAULT '',   -- accent color (hex), used for the rail badge
+  image       TEXT DEFAULT '',   -- optional uploaded image (data URL), overrides icon
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
@@ -68,6 +84,7 @@ CREATE TABLE IF NOT EXISTS messages (
   thread_id  INTEGER NOT NULL,
   agent_id   INTEGER NOT NULL,
   body       TEXT NOT NULL,
+  tokens     INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS mentions (
@@ -90,6 +107,14 @@ CREATE INDEX IF NOT EXISTS idx_thr_server ON threads(server_id);
 
 // Migration for DBs created before multi-server support: add threads.server_id.
 try { db.exec('ALTER TABLE threads ADD COLUMN server_id INTEGER NOT NULL DEFAULT 1'); } catch { /* already present */ }
+// Migration for DBs created before per-server invites.
+try { db.exec('ALTER TABLE invites ADD COLUMN server_id INTEGER NOT NULL DEFAULT 1'); } catch { /* already present */ }
+// Migration for server customization (icon / color / image).
+for (const col of ['icon', 'color', 'image']) {
+  try { db.exec(`ALTER TABLE servers ADD COLUMN ${col} TEXT DEFAULT ''`); } catch { /* already present */ }
+}
+// Migration for real per-message token counts.
+try { db.exec('ALTER TABLE messages ADD COLUMN tokens INTEGER NOT NULL DEFAULT 0'); } catch { /* already present */ }
 
 export const now = () => Date.now();
 export const newToken = () => randomBytes(18).toString('base64url');
@@ -150,29 +175,78 @@ export const setPresence = db.prepare('UPDATE agents SET presence=?, last_seen=?
 export const setStatus = db.prepare('UPDATE agents SET status=? WHERE id=?');
 export const touchAgent = db.prepare('UPDATE agents SET last_seen=?, presence=? WHERE id=?');
 
-// ---- invites ------------------------------------------------------------
+// ---- invites (per-server) -----------------------------------------------
 export const createInvite = db.prepare(
-  'INSERT INTO invites(code,note,created_at) VALUES(?,?,?)'
+  'INSERT INTO invites(code,note,server_id,created_at) VALUES(?,?,?,?)'
 );
 export const inviteByCode = db.prepare('SELECT * FROM invites WHERE code=?');
 export const useInvite = db.prepare('UPDATE invites SET used_by=?, used_at=? WHERE code=?');
 export const listInvites = db.prepare('SELECT * FROM invites ORDER BY created_at DESC');
 
+// ---- per-server membership ----------------------------------------------
+const insSM = db.prepare(
+  `INSERT INTO server_members(server_id,agent_id,status,joined_at) VALUES(?,?,?,?)
+   ON CONFLICT(server_id,agent_id) DO UPDATE SET status=excluded.status`
+);
+export function joinServer(serverId, agentId, status = 'active') {
+  insSM.run(serverId, agentId, status, now());
+}
+export const memberStatus = db.prepare(
+  'SELECT status FROM server_members WHERE server_id=? AND agent_id=?'
+);
+export const isActiveMember = (serverId, agentId) => {
+  const r = memberStatus.get(serverId, agentId);
+  return r && r.status === 'active';
+};
+export const leaveServer = db.prepare('DELETE FROM server_members WHERE server_id=? AND agent_id=?');
+export const setMemberStatus = db.prepare(
+  'UPDATE server_members SET status=? WHERE server_id=? AND agent_id=?'
+);
+// Active members of a server (with agent details).
+export const serverMembers = db.prepare(
+  `SELECT a.id, a.nick, a.presence, a.kind, a.bio, sm.status
+   FROM server_members sm JOIN agents a ON a.id=sm.agent_id
+   WHERE sm.server_id=? ORDER BY a.nick`
+);
+// Servers an agent is an ACTIVE member of.
+export const myServers = db.prepare(
+  `SELECT s.* FROM server_members sm JOIN servers s ON s.id=sm.server_id
+   WHERE sm.agent_id=? AND sm.status='active' ORDER BY s.id`
+);
+// Pending join requests (optionally for one server).
+export const pendingMembers = db.prepare(
+  `SELECT sm.server_id, a.id AS agent_id, a.nick
+   FROM server_members sm JOIN agents a ON a.id=sm.agent_id
+   WHERE sm.status='pending' ORDER BY sm.joined_at`
+);
+// Agents that share at least one active server with me (the people I can talk to).
+export const coMembers = db.prepare(
+  `SELECT DISTINCT a.* FROM agents a
+   JOIN server_members m1 ON m1.agent_id=a.id AND m1.status='active'
+   WHERE m1.server_id IN (
+     SELECT server_id FROM server_members WHERE agent_id=? AND status='active'
+   ) AND a.status='active' ORDER BY a.nick`
+);
+export const countMembers = db.prepare('SELECT COUNT(*) AS n FROM server_members');
+
 // ---- servers (workspaces) ----------------------------------------------
 const insServer = db.prepare(
-  `INSERT INTO servers(name,slug,description,stack,repo,context,created_at,updated_at)
-   VALUES(?,?,?,?,?,?,?,?)`
+  `INSERT INTO servers(name,slug,description,stack,repo,context,icon,color,image,created_at,updated_at)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?)`
 );
-export function createServer({ name, description = '', stack = '', repo = '', context = '' }) {
+export function createServer({ name, description = '', stack = '', repo = '', context = '', icon = '', color = '', image = '' }) {
   const t = now();
-  const info = insServer.run(name, slugify(name), description, stack, repo, context, t, t);
-  return Number(info.lastInsertRowid);
+  const info = insServer.run(name, slugify(name), description, stack, repo, context, icon, color, image, t, t);
+  const id = Number(info.lastInsertRowid);
+  const human = humanAgent();
+  if (human) joinServer(id, human.id, 'active'); // operator is in every server
+  return id;
 }
 export const listServers = db.prepare('SELECT * FROM servers ORDER BY id');
 export const serverById = db.prepare('SELECT * FROM servers WHERE id=?');
 export const countServers = db.prepare('SELECT COUNT(*) AS n FROM servers');
 const updServer = db.prepare(
-  `UPDATE servers SET name=?, slug=?, description=?, stack=?, repo=?, context=?, updated_at=? WHERE id=?`
+  `UPDATE servers SET name=?, slug=?, description=?, stack=?, repo=?, context=?, icon=?, color=?, image=?, updated_at=? WHERE id=?`
 );
 export function updateServer(id, f) {
   const s = serverById.get(id);
@@ -180,7 +254,8 @@ export function updateServer(id, f) {
   const name = f.name ?? s.name;
   updServer.run(
     name, slugify(name), f.description ?? s.description, f.stack ?? s.stack,
-    f.repo ?? s.repo, f.context ?? s.context, now(), id
+    f.repo ?? s.repo, f.context ?? s.context, f.icon ?? s.icon, f.color ?? s.color,
+    f.image ?? s.image, now(), id
   );
   return true;
 }
@@ -201,6 +276,18 @@ function seedServers() {
   }
 }
 seedServers();
+
+// Backfill memberships for DBs that predate per-server access: the human joins
+// every server; every existing active agent joins the default server (1).
+function seedMembers() {
+  if (countMembers.get().n > 0) return;
+  const human = humanAgent();
+  for (const s of listServers.all()) if (human) joinServer(s.id, human.id, 'active');
+  for (const a of allAgents.all()) {
+    if (a.status === 'active' && a.kind !== 'human') joinServer(1, a.id, 'active');
+  }
+}
+seedMembers();
 
 // ---- threads & members --------------------------------------------------
 const insThread = db.prepare(
@@ -238,11 +325,11 @@ export const allThreads = db.prepare('SELECT * FROM threads ORDER BY updated_at 
 
 // ---- messages -----------------------------------------------------------
 const insMsg = db.prepare(
-  'INSERT INTO messages(thread_id,agent_id,body,created_at) VALUES(?,?,?,?)'
+  'INSERT INTO messages(thread_id,agent_id,body,tokens,created_at) VALUES(?,?,?,?,?)'
 );
 export function postMessage({ threadId, agentId, body }) {
   const t = now();
-  const info = insMsg.run(threadId, agentId, body, t);
+  const info = insMsg.run(threadId, agentId, body, countTokens(body), t);
   touchThread.run(t, threadId);
   return Number(info.lastInsertRowid);
 }
@@ -257,6 +344,19 @@ export const lastMessages = db.prepare(
    WHERE msg.thread_id=? ORDER BY msg.id DESC LIMIT ?`
 );
 export const maxMsgId = db.prepare('SELECT COALESCE(MAX(id),0) AS m FROM messages');
+// Real token cost per thread: sum of per-message token counts (see countTokens).
+export const threadTokens = db.prepare(
+  'SELECT COALESCE(SUM(tokens),0) AS tokens, COUNT(*) AS n FROM messages WHERE thread_id=?'
+);
+
+// One-time backfill: tokenize any messages stored before token tracking existed.
+const _setMsgTokens = db.prepare('UPDATE messages SET tokens=? WHERE id=?');
+const _untokenized = db.prepare("SELECT id, body FROM messages WHERE tokens=0 AND body<>''").all();
+if (_untokenized.length) {
+  db.exec('BEGIN');
+  for (const m of _untokenized) _setMsgTokens.run(countTokens(m.body), m.id);
+  db.exec('COMMIT');
+}
 
 // ---- mentions -----------------------------------------------------------
 export const insMention = db.prepare(

@@ -16,6 +16,8 @@ import * as db from './db.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUB = join(__dirname, 'public');
 const PORT = process.env.AGORA_PORT || 4477;
+const MCP_PATH = join(__dirname, 'mcp.js');
+const AGORA_HOME = process.env.AGORA_HOME || null; // only surfaced if non-default
 
 // ---- tiny session store (human login) -----------------------------------
 const sessions = new Set();
@@ -56,21 +58,30 @@ function fullState() {
   const threads = db.allThreads.all().map((t) => {
     const members = db.threadMembers.all(t.id).map((m) => m.nick);
     const last = db.lastMessages.all(t.id, 1)[0] || null;
+    const c = db.threadTokens.get(t.id);
     return {
       id: t.id, server_id: t.server_id, title: t.title, members, updated_at: t.updated_at,
+      tokens: c.tokens, msgs: c.n, // real BPE token count
       last: last ? { nick: last.nick, body: last.body, at: last.created_at } : null,
     };
   });
+  const serverName = (id) => { const s = db.serverById.get(id); return s ? s.name : `S${id}`; };
   const servers = db.listServers.all().map((s) => ({
     id: s.id, name: s.name, slug: s.slug, description: s.description,
     stack: s.stack, repo: s.repo, context: s.context,
+    icon: s.icon, color: s.color, image: s.image,
+    members: db.serverMembers.all(s.id).map((m) => ({
+      id: m.id, nick: m.nick, presence: m.presence, kind: m.kind, bio: m.bio, status: m.status,
+    })),
   }));
   return {
     server_name: db.getConfig('server_name', 'Agora'),
     require_approval: db.getConfig('require_approval') === '1',
     require_invite: db.getConfig('require_invite') === '1',
     agents, threads, servers,
-    invites: db.listInvites.all().map((i) => ({ code: i.code, note: i.note, used: !!i.used_by })),
+    joinRequests: db.pendingMembers.all().map((p) => ({ server_id: p.server_id, server: serverName(p.server_id), agent_id: p.agent_id, nick: p.nick })),
+    invites: db.listInvites.all().map((i) => ({ code: i.code, note: i.note, used: !!i.used_by, server_id: i.server_id, server: serverName(i.server_id) })),
+    connect: { mcpPath: MCP_PATH, home: AGORA_HOME, pkg: '@run-agents/threads' },
   };
 }
 
@@ -115,7 +126,8 @@ const server = createServer(async (req, res) => {
     const t = db.threadById.get(id);
     if (!t) return send(res, 404, { error: 'no thread' });
     const messages = db.messagesIn.all(id).map((m) => ({ nick: m.nick, kind: m.kind, body: m.body, at: m.created_at }));
-    return send(res, 200, { id, title: t.title, members: db.threadMembers.all(id).map((a) => a.nick), messages });
+    const c = db.threadTokens.get(id);
+    return send(res, 200, { id, title: t.title, server_id: t.server_id, tokens: c.tokens, members: db.threadMembers.all(id).map((a) => a.nick), messages });
   }
 
   if (path === '/api/thread/new' && req.method === 'POST') {
@@ -123,14 +135,14 @@ const server = createServer(async (req, res) => {
     const { server_id, title, members, msg } = await readBody(req);
     if (!title || !Array.isArray(members)) return send(res, 400, { error: 'title and members required' });
     const human = db.humanAgent();
+    const sid = server_id || 1;
     const ids = [];
     for (const n of members) {
       const a = db.agentByNick.get(String(n).toLowerCase());
-      if (a && a.status === 'active') ids.push(a.id);
+      if (a && a.status === 'active' && db.isActiveMember(sid, a.id)) ids.push(a.id);
     }
     const threadId = db.createThread({
-      title: String(title).slice(0, 120), creatorId: human.id, memberIds: ids,
-      serverId: server_id || 1,
+      title: String(title).slice(0, 120), creatorId: human.id, memberIds: ids, serverId: sid,
     });
     if (msg) {
       const msgId = db.postMessage({ threadId, agentId: human.id, body: String(msg).slice(0, 8000) });
@@ -158,22 +170,35 @@ const server = createServer(async (req, res) => {
     return send(res, 200, { ok: true });
   }
 
-  if (path === '/api/approve' && req.method === 'POST') {
-    const { id } = await readBody(req);
-    db.setStatus.run('active', id);
+  // Per-server membership management.
+  if (path === '/api/server/member/approve' && req.method === 'POST') {
+    const { server_id, agent_id } = await readBody(req);
+    db.setMemberStatus.run('active', server_id, agent_id);
     return send(res, 200, { ok: true });
   }
-  if (path === '/api/reject' && req.method === 'POST') {
-    const { id } = await readBody(req);
-    db.setStatus.run('rejected', id);
+  if (path === '/api/server/member/reject' && req.method === 'POST') {
+    const { server_id, agent_id } = await readBody(req);
+    db.leaveServer.run(server_id, agent_id);
+    return send(res, 200, { ok: true });
+  }
+  if (path === '/api/server/member/remove' && req.method === 'POST') {
+    const { server_id, agent_id } = await readBody(req);
+    db.leaveServer.run(server_id, agent_id);
+    return send(res, 200, { ok: true });
+  }
+  if (path === '/api/server/member/add' && req.method === 'POST') {
+    const { server_id, nick } = await readBody(req);
+    const a = db.agentByNick.get(String(nick).toLowerCase());
+    if (!a) return send(res, 404, { error: 'no such agent' });
+    db.joinServer(server_id, a.id, 'active');
     return send(res, 200, { ok: true });
   }
 
   if (path === '/api/invite' && req.method === 'POST') {
-    const { note } = await readBody(req);
+    const { note, server_id } = await readBody(req);
     const code = db.newCode();
-    db.createInvite.run(code, note || '', db.now());
-    return send(res, 200, { code });
+    db.createInvite.run(code, note || '', server_id || 1, db.now());
+    return send(res, 200, { code, server_id: server_id || 1 });
   }
 
   // --- servers (workspaces) ---
@@ -223,6 +248,8 @@ setInterval(() => {
     db.allAgents.all().map((a) => a.id + a.status + a.presence).join(','),
     db.allThreads.all().map((t) => t.id + ':' + t.updated_at).join(','),
     db.listServers.all().map((s) => s.id + ':' + s.updated_at).join(','),
+    'm' + db.countMembers.get().n + 'p' + db.pendingMembers.all().length,
+    'i' + db.listInvites.all().length,
   ].join('|');
   if (sig !== lastSig) {
     lastSig = sig;

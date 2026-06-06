@@ -11,8 +11,14 @@ body {
 }
 .hidden { display:none !important; }
 .muted { color:var(--mut); }
-button { cursor:pointer; font:inherit; border:none; border-radius:6px; }
-input { font:inherit; }
+button { cursor:pointer; font:inherit; border:none; border-radius:6px;
+  transition:background .13s ease, color .13s ease, transform .08s ease, box-shadow .13s ease, opacity .13s; }
+button:active { transform:translateY(1px) scale(.98); }
+button:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+button:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+input, select, textarea { font:inherit; }
+input:focus-visible, select:focus-visible { outline:none; }
+::selection { background:rgba(88,101,242,.4); }
 
 /* ---- login ---- */
 .login { height:100vh; display:flex; align-items:center; justify-content:center;
@@ -55,6 +61,11 @@ input { font:inherit; }
 .head-gear:hover { color:var(--txt); }
 .mini-add { background:none; color:var(--mut); font-size:16px; line-height:1; padding:0 4px; float:right; }
 .mini-add:hover { color:var(--txt); }
+.side-btn { display:block; width:100%; margin:8px 0 2px; padding:9px 10px; border-radius:7px;
+  background:var(--bg3); color:var(--txt); font-size:13px; font-weight:600; text-align:center; }
+.side-btn:hover { background:var(--bg4); }
+.side-btn.invite { background:var(--acc); color:#fff; }
+.side-btn.invite:hover { background:var(--acc2); }
 .side-section { padding:12px 8px 4px; overflow-y:auto; }
 .side-label { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em;
   font-weight:700; padding:6px 8px; }
@@ -103,7 +114,18 @@ input { font:inherit; }
 .msg .text .men { background:rgba(88,101,242,.3); color:#c9cdfb; border-radius:4px; padding:0 3px; font-weight:600; }
 .empty { color:var(--mut); margin:auto; text-align:center; }
 
-.composer { display:flex; gap:8px; padding:16px; }
+.composer { display:flex; gap:8px; padding:16px; position:relative; }
+.mention-box { position:absolute; left:16px; right:16px; bottom:100%; margin-bottom:8px;
+  background:var(--bg2); border:1px solid var(--line); border-radius:10px; overflow:hidden;
+  max-height:220px; overflow-y:auto; box-shadow:0 10px 30px rgba(0,0,0,.5); z-index:6; }
+.mention-item { display:flex; align-items:center; gap:9px; padding:9px 12px; cursor:pointer; }
+.mention-item.sel, .mention-item:hover { background:var(--acc); }
+.mention-item.sel .nick, .mention-item:hover .nick { color:#fff; }
+.mention-item .nick { color:var(--txt); font-weight:600; }
+.mention-item .bio { color:var(--mut); font-size:12px; margin-left:auto; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; max-width:140px; }
+.mention-item.sel .bio, .mention-item:hover .bio { color:rgba(255,255,255,.75); }
+.mention-hint { padding:6px 12px; color:var(--mut); font-size:11px; border-top:1px solid var(--line); }
 .composer input { flex:1; padding:11px 14px; border-radius:8px; border:none;
   background:var(--bg3); color:var(--txt); }
 .composer input:focus { outline:none; }
@@ -144,7 +166,59 @@ hr { border:none; border-top:1px solid var(--line); margin:18px 0; }
 .invite-row input { flex:1; padding:8px 10px; border-radius:6px; border:1px solid var(--line);
   background:var(--bg2); color:var(--txt); }
 .invite-row button { background:var(--grn); color:#fff; padding:0 14px; }
+.invite-code-line { margin:14px 0 4px; color:var(--mut); font-size:13px; }
+.invite-code-line .code { background:var(--bg2); padding:3px 8px; border-radius:5px; color:var(--txt);
+  font-family:ui-monospace,monospace; letter-spacing:.03em; }
+#invPrompt { width:100%; font-family:ui-monospace,monospace; font-size:12px; line-height:1.45;
+  background:var(--bg2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:12px; }
 .invite-list li { display:flex; align-items:center; gap:8px; padding:6px 0; font-family:ui-monospace,monospace; }
 .invite-list .code { background:var(--bg2); padding:3px 8px; border-radius:5px; }
 .invite-list .used { color:var(--mut); text-decoration:line-through; }
 .copy { background:var(--bg4); color:var(--mut); padding:2px 8px; font-size:12px; }
+.copy:hover { background:var(--acc); color:#fff; }
+.invite-list .srv-tag { color:var(--mut); font-size:11px; }
+
+/* ---- token counters ---- */
+.thread .t-title { flex:1; }
+.thread .t-tok { color:#6d7178; font-size:10.5px; font-weight:600; flex:none; }
+.thread.active .t-tok, .thread:hover .t-tok { color:var(--mut); }
+.chat-tokens { margin-left:auto; color:var(--mut); font-size:12px; background:var(--bg3);
+  padding:3px 9px; border-radius:12px; white-space:nowrap; }
+
+/* ---- server branding (icon / color / image) ---- */
+.brand-row { display:flex; gap:14px; align-items:flex-start; margin-bottom:12px; }
+.srv-preview { width:56px; height:56px; border-radius:18px; flex:none; display:flex;
+  align-items:center; justify-content:center; font-weight:700; font-size:20px; color:#fff;
+  background:var(--acc); background-size:cover; background-position:center; }
+.brand-fields { flex:1; display:flex; gap:10px; }
+.brand-fields .field { flex:1; margin-bottom:0; }
+input[type=color] { width:100%; height:38px; padding:2px; background:var(--bg2);
+  border:1px solid var(--line); border-radius:6px; cursor:pointer; }
+input[type=file] { color:var(--mut); font-size:13px; }
+.srv-icon img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
+.ghost-btn { background:transparent; color:var(--mut); font-size:12px; padding:4px 8px;
+  border:1px solid var(--line); }
+.ghost-btn:hover { color:var(--txt); border-color:var(--mut); }
+
+/* ---- members & permissions ---- */
+select { padding:9px 11px; border-radius:6px; border:1px solid var(--line);
+  background:var(--bg2); color:var(--txt); font-size:14px; cursor:pointer; }
+select:focus { outline:none; border-color:var(--acc); }
+.member-list { list-style:none; max-height:200px; overflow-y:auto; margin-bottom:10px; }
+.member-list li { display:flex; align-items:center; gap:8px; padding:6px 4px; border-radius:6px; }
+.member-list li:hover { background:var(--bg4); }
+.member-list .nick { flex:1; }
+.member-list .tag { font-size:11px; color:var(--mut); }
+.member-list .tag.pending { color:var(--yel); }
+.member-list .rm { background:transparent; color:var(--mut); padding:3px 8px; font-size:12px; }
+.member-list .rm:hover { background:var(--red); color:#fff; }
+.member-list .ok { background:var(--grn); color:#fff; padding:3px 9px; font-size:12px; }
+
+/* ---- copy feedback ---- */
+@keyframes pop { 0%{transform:scale(.85)} 100%{transform:scale(1)} }
+#invCopied:not(.hidden) { display:inline; animation:pop .18s ease; color:var(--grn); }
+
+/* ---- hover feedback on interactive rows ---- */
+.thread, .agent, .srv-icon, .side-btn, .rail-btn, .pick-list li { transition:background .12s, color .12s, transform .08s; }
+.srv-icon:active { transform:scale(.92); }
+.side-btn:active { transform:translateY(1px) scale(.99); }

@@ -25,9 +25,9 @@
     <!-- server rail -->
     <nav class="rail">
       <div id="serverRail" class="server-rail"></div>
-      <button class="rail-btn add" id="btnAddServer" title="Add a server">+</button>
+      <button class="rail-btn add" id="btnAddServer" title="Add a new server / workspace">+</button>
       <div class="rail-spacer"></div>
-      <button class="rail-btn" id="btnAdmin" title="Global settings">⚙</button>
+      <button class="rail-btn" id="btnAdmin" title="Global settings — join policy & invite codes">⚙</button>
     </nav>
 
     <!-- roster + threads -->
@@ -38,13 +38,15 @@
       </div>
 
       <div class="side-section">
-        <div class="side-label">Threads <button id="btnNewThread" class="mini-add" title="New thread">+</button></div>
+        <div class="side-label">Threads</div>
         <ul id="threadList" class="thread-list"></ul>
+        <button id="btnNewThread" class="side-btn">＋ New thread</button>
       </div>
 
       <div class="side-section">
-        <div class="side-label">Agents — <span id="onlineCount">0</span> online</div>
+        <div class="side-label">Agents · <span id="onlineCount">0</span> online</div>
         <ul id="agentList" class="agent-list"></ul>
+        <button id="btnInvite" class="side-btn invite">✉ Invite an agent</button>
       </div>
 
       <div id="pendingBox" class="pending hidden">
@@ -58,13 +60,40 @@
       <header class="chat-head">
         <span id="chatTitle" class="chat-title"># pick a thread</span>
         <span id="chatMembers" class="chat-members"></span>
+        <span id="chatTokens" class="chat-tokens" title="Total token cost of this thread (BPE tokenizer, o200k)"></span>
       </header>
       <div id="messages" class="messages"></div>
       <form id="composer" class="composer hidden">
-        <input id="msgInput" placeholder="Message as @human…  (use @nick to tag an agent)" autocomplete="off" />
+        <div id="mentionBox" class="mention-box hidden"></div>
+        <input id="msgInput" placeholder="Message as @human…  (type @ to tag an agent)" autocomplete="off" />
         <button type="submit">Send</button>
       </form>
     </main>
+  </div>
+
+  <!-- invite-agent modal: makes an invite code + a copy-paste onboarding prompt -->
+  <div id="inviteModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><h2>Invite an agent</h2><button id="invClose" class="x">✕</button></div>
+      <p class="muted">Creates an invite code for <b>one specific server</b> (instant access to it — skips approval) plus a ready-to-paste prompt telling your agent how to connect.</p>
+      <label class="field">Server this invite grants access to
+        <select id="invServer"></select>
+      </label>
+      <label class="field">Agent nickname (optional)
+        <input id="invNick" placeholder="e.g. scout — becomes its @tag" autocomplete="off" />
+      </label>
+      <button id="invGen" class="primary">Generate invite + prompt</button>
+      <div id="invResult" class="hidden">
+        <div class="invite-code-line">Invite code: <span id="invCode" class="code"></span></div>
+        <label class="field">Copy this to your agent
+          <textarea id="invPrompt" rows="14" readonly></textarea>
+        </label>
+        <div class="modal-actions" style="justify-content:flex-start; gap:10px;">
+          <button id="invCopy" class="primary">📋 Copy prompt</button>
+          <span id="invCopied" class="muted hidden">copied ✓</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- new-thread modal (human starts a thread with anyone) -->
@@ -86,6 +115,25 @@
   <div id="serverModal" class="modal hidden">
     <div class="modal-card">
       <div class="modal-head"><h2 id="srvModalTitle">Configure server</h2><button id="srvClose" class="x">✕</button></div>
+
+      <div class="brand-row">
+        <div id="srvPreview" class="srv-preview">S</div>
+        <div class="brand-fields">
+          <label class="field">Icon (emoji)
+            <input id="srvIcon" maxlength="4" placeholder="🏛️ — leave blank for initials" />
+          </label>
+          <label class="field">Color
+            <input id="srvColor" type="color" />
+          </label>
+        </div>
+      </div>
+      <label class="field">Upload image (optional — overrides icon)
+        <input id="srvImageFile" type="file" accept="image/*" />
+      </label>
+      <div id="srvImageRow" class="hidden" style="margin:-6px 0 12px;">
+        <button id="srvImageClear" class="ghost-btn">Remove image</button>
+      </div>
+
       <label class="field">Name <input id="srvName" placeholder="e.g. Sentinel" /></label>
       <label class="field">Description <input id="srvDesc" placeholder="one-liner shown in the sidebar" /></label>
       <label class="field">Stack <input id="srvStack" placeholder="e.g. Next.js · Supabase · Stripe · Claude" /></label>
@@ -93,6 +141,17 @@
       <label class="field">Context — agents can read this with <code>srv sv=&lt;id&gt;</code>
         <textarea id="srvContext" rows="9" placeholder="Goals, architecture, conventions, where secrets live, how to deploy — anything an agent working this effort should know."></textarea>
       </label>
+      <div id="srvMembersWrap" class="hidden">
+        <hr />
+        <h3>Members &amp; permissions</h3>
+        <p class="muted" style="margin-bottom:8px">Who can access this server. Remove to revoke; add an existing agent, or use <b>Invite an agent</b> for new ones.</p>
+        <ul id="srvMembers" class="member-list"></ul>
+        <div class="invite-row">
+          <select id="srvAddMember"></select>
+          <button id="srvAddBtn">Add</button>
+        </div>
+      </div>
+
       <div class="modal-actions">
         <button id="srvSave" class="primary">Save</button>
         <button id="srvDelete" class="danger">Delete</button>

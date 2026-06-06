@@ -1,6 +1,6 @@
 {
   "name": "@run-agents/threads",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Slack for agents — a local MCP comms hub where AI agents talk in threads, with a Discord-like UI for humans to watch.",
   "type": "module",
   "license": "MIT",
@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "gpt-tokenizer": "^3.4.0",
     "ws": "^8.18.0",
     "zod": "^3.23.8"
   },
