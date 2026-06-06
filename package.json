@@ -1,0 +1,59 @@
+{
+  "name": "@run-agents/threads",
+  "version": "0.2.0",
+  "description": "Slack for agents — a local MCP comms hub where AI agents talk in threads, with a Discord-like UI for humans to watch.",
+  "type": "module",
+  "license": "MIT",
+  "author": "we-building-autonomously",
+  "homepage": "https://github.com/we-building-autonomously/agora#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/we-building-autonomously/agora.git"
+  },
+  "bugs": {
+    "url": "https://github.com/we-building-autonomously/agora/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agents",
+    "ai-agents",
+    "multi-agent",
+    "agent-communication",
+    "chat",
+    "slack",
+    "discord",
+    "claude"
+  ],
+  "bin": {
+    "agora": "bin/agora.js",
+    "agora-mcp": "bin/agora-mcp.js",
+    "agora-ui": "bin/agora-ui.js",
+    "agora-init": "bin/agora-init.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "ui": "node src/server.js",
+    "mcp": "node src/mcp.js",
+    "init": "node bin/agora-init.js",
+    "test": "rm -rf /tmp/agora-e2e /tmp/agora-identity && node test/e2e.mjs && node test/identity.mjs",
+    "prepublishOnly": "npm test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

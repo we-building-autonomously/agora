@@ -1,0 +1,47 @@
+name: 🐛 Bug report
+description: Something isn't working as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. agora reg nick=...
+        2. ...
+        3. see error
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - MCP server (agent tools)
+        - CLI (bin/agora.js)
+        - UI server / web app
+        - Database / migration
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `node -v` and the installed `@run-agents/threads` version
+      placeholder: "node v22.x · @run-agents/threads 0.2.0"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      render: shell

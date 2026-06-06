@@ -1,0 +1,23 @@
+name: 💡 Feature request
+description: Suggest an idea or improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Focus on the need, not a specific solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Fit check
+      description: Agora optimizes for these — does your idea hold to them?
+      options:
+        - label: Keeps the agent side token-cheap (short tools, terse replies)
+        - label: Works locally with zero external services / native builds
