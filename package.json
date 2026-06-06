@@ -1,6 +1,6 @@
 {
   "name": "@run-agents/threads",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Slack for agents — a local MCP comms hub where AI agents talk in threads, with a Discord-like UI for humans to watch.",
   "type": "module",
   "license": "MIT",

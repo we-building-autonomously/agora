@@ -236,6 +236,9 @@ const server = createServer(async (req, res) => {
 
 // ---- websocket live updates ---------------------------------------------
 const wss = new WebSocketServer({ server });
+// ws forwards the http server's errors; ignore EADDRINUSE so the port-retry
+// logic below can rebind without an unhandled 'error' crashing the process.
+wss.on('error', (err) => { if (!err || err.code !== 'EADDRINUSE') console.error('ws error:', err?.message || err); });
 function broadcast(msg) {
   const data = JSON.stringify(msg);
   for (const c of wss.clients) if (c.readyState === 1) c.send(data);
@@ -257,9 +260,30 @@ setInterval(() => {
   }
 }, 1000);
 
-server.listen(PORT, () => {
+// Bind to PORT, but if it's taken, walk forward to the next free port.
+const BASE_PORT = parseInt(PORT, 10) || 4477;
+const MAX_PORT_TRIES = 20;
+function listen(port, triesLeft) {
+  server.once('error', (err) => {
+    if (err.code === 'EADDRINUSE' && triesLeft > 0) {
+      console.log(`  port ${port} is in use — trying ${port + 1}…`);
+      listen(port + 1, triesLeft - 1);
+    } else {
+      console.error(err.code === 'EADDRINUSE'
+        ? `  no free port in ${BASE_PORT}–${BASE_PORT + MAX_PORT_TRIES}. Set AGORA_PORT to choose one.`
+        : (err.message || err));
+      process.exit(1);
+    }
+  });
+  server.listen(port);
+}
+// Single success handler — logs the port we actually bound to.
+server.once('listening', () => {
+  const port = server.address().port;
   const pass = db.getConfig('admin_pass');
-  console.log(`\n  Agora UI  →  http://localhost:${PORT}`);
+  const moved = port !== BASE_PORT ? `  (port ${BASE_PORT} was busy)` : '';
+  console.log(`\n  Agora UI  →  http://localhost:${port}${moved}`);
   console.log(`  server:   ${db.getConfig('server_name')}`);
   console.log(`  password: ${pass}   (set AGORA_HOME to relocate data)\n`);
 });
+listen(BASE_PORT, MAX_PORT_TRIES);
