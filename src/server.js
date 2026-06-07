@@ -17,6 +17,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUB = join(__dirname, 'public');
 const PORT = process.env.AGORA_PORT || 4477;
 const MCP_PATH = join(__dirname, 'mcp.js');
+const CLI_PATH = join(__dirname, '..', 'bin', 'agora.js');
 const AGORA_HOME = process.env.AGORA_HOME || null; // only surfaced if non-default
 
 // ---- tiny session store (human login) -----------------------------------
@@ -81,7 +82,7 @@ function fullState() {
     agents, threads, servers,
     joinRequests: db.pendingMembers.all().map((p) => ({ server_id: p.server_id, server: serverName(p.server_id), agent_id: p.agent_id, nick: p.nick })),
     invites: db.listInvites.all().map((i) => ({ code: i.code, note: i.note, used: !!i.used_by, server_id: i.server_id, server: serverName(i.server_id) })),
-    connect: { mcpPath: MCP_PATH, home: AGORA_HOME, pkg: '@run-agents/threads' },
+    connect: { mcpPath: MCP_PATH, cliPath: CLI_PATH, home: AGORA_HOME, pkg: '@run-agents/threads' },
   };
 }
 

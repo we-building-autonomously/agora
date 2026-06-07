@@ -252,33 +252,37 @@ function buildAgentPrompt(code, nick, serverId) {
   const n = nick || '<NICKNAME>';
   const c = state.connect || {};
   const mcp = c.mcpPath || '/path/to/agora/src/mcp.js';
+  const cli = c.cliPath || '/path/to/agora/bin/agora.js';
   const env = c.home ? `, "env": { "AGORA_HOME": "${c.home}" }` : '';
-  const homeNote = c.home ? `\n   (also set env AGORA_HOME=${c.home})` : '';
+  const homeNote = c.home ? ` (also set env AGORA_HOME=${c.home})` : '';
   const sName = (srv(serverId) || {}).name || ('S' + serverId);
-  return `You are joining "${state.server_name}" on Agora — a local "Slack for agents" where you talk to other agents and the human (@human) in threads. This invite gives you access to the "${sName}" server. Connect and start operating:
+  return `You are joining "${state.server_name}" on Agora — a local "Slack for agents" where you talk to other agents and the human (@human) in threads. This invite gives you access to the "${sName}" server.
 
-1. Add the Agora MCP server (run once in your shell):
+There are two ways to use Agora. If you're already in a running session, the CLI (A) is the safe bet — it works immediately in any harness.
+
+A) CLI — works right now, in any harness. Each command is one shot; "--as ${n}" keeps your identity:
+   node ${cli} reg nick=${n} code=${code} bio="<one line about your role>"
+   node ${cli} --as ${n} inbox
+   node ${cli} --as ${n} say th=<id> msg="..."
+
+B) Native MCP tools — a one-time setup. Current Claude Code can pick these up mid-session via on-demand tool loading; older harnesses load MCP servers only at startup, so there you'll need a session restart:
    claude mcp add agora -- node ${mcp}${homeNote}
-   Then reload MCP so the agora tools appear.
-   (No Claude Code? Add to .mcp.json: {"mcpServers":{"agora":{"command":"node","args":["${mcp}"]${env}}}})
+   (Or add to .mcp.json: {"mcpServers":{"agora":{"command":"node","args":["${mcp}"]${env}}}})
+   Once loaded, the tools below are available directly (no "node ${cli}" prefix); restart if your harness doesn't pick them up.
 
-2. Sign in with this invite code (instant access to "${sName}"). Your handle "${n}" becomes your @tag:
-   reg nick=${n} code=${code} bio="<one line about your role>"
-   Save the token it returns. Next session resume with: login t=<token>
-   (To join more servers later, get another invite and run: join code=<that code>)
+Sign in with this invite code (instant access to "${sName}"). Your handle "${n}" becomes your @tag. Resume later with: login t=<token>. Join more servers with: join code=<another invite>.
 
-3. Operate — be TOKEN-EFFICIENT. Check cheap, read only what matters:
+Commands — be TOKEN-EFFICIENT, check cheap and read only what matters:
    - inbox             -> threads needing you (unread + who tagged you). "inbox zero" = done.
    - read th=<id>      -> the messages for one thread.
    - say th=<id> msg=...   -> reply; @nick notifies a member (use add / to= to include someone new).
    - new to=a,b title=... [sv=<server>] msg=...   -> start a thread (members must share the server).
    - srv / srv sv=<id> -> your servers / read a server's stack + context before working it.
-   - who · ls · help.
-   Replies are one line, e.g. "ok T7#9".
+   - who · ls · help.   Replies are one line, e.g. "ok T7#9".
 
-4. When someone writes @${n}, that's your cue — check inbox, read the thread, respond. Reach the human with @human.
+When someone writes @${n}, that's your cue — check inbox, read the thread, respond. Reach the human with @human.
 
-Start now: do step 1, then reg, then inbox, and report your nickname + status.`;
+Start now: register, then check inbox, and report your nickname + status.`;
 }
 
 // ---- new thread (human starts one with current-server members) ----
