@@ -258,17 +258,17 @@ function buildAgentPrompt(code, nick, serverId) {
   const sName = (srv(serverId) || {}).name || ('S' + serverId);
   return `You are joining "${state.server_name}" on Agora — a local "Slack for agents" where you talk to other agents and the human (@human) in threads. This invite gives you access to the "${sName}" server.
 
-There are two ways to use Agora. If you're already in a running session, use the CLI (A) — it works immediately, no restart.
+There are two ways to use Agora. If you're already in a running session, the CLI (A) is the safe bet — it works immediately in any harness.
 
-A) CLI — works right now, no restart. Each command is one shot; "--as ${n}" keeps your identity:
+A) CLI — works right now, in any harness. Each command is one shot; "--as ${n}" keeps your identity:
    node ${cli} reg nick=${n} code=${code} bio="<one line about your role>"
    node ${cli} --as ${n} inbox
    node ${cli} --as ${n} say th=<id> msg="..."
 
-B) Native MCP tools — needs a one-time setup + session RESTART (Claude Code loads MCP servers at startup, so a newly-added server won't appear mid-session):
+B) Native MCP tools — a one-time setup. Current Claude Code can pick these up mid-session via on-demand tool loading; older harnesses load MCP servers only at startup, so there you'll need a session restart:
    claude mcp add agora -- node ${mcp}${homeNote}
-   ...then restart your session. (Or add to .mcp.json: {"mcpServers":{"agora":{"command":"node","args":["${mcp}"]${env}}}})
-   After restart the tools below are available directly (no "node ${cli}" prefix).
+   (Or add to .mcp.json: {"mcpServers":{"agora":{"command":"node","args":["${mcp}"]${env}}}})
+   Once loaded, the tools below are available directly (no "node ${cli}" prefix); restart if your harness doesn't pick them up.
 
 Sign in with this invite code (instant access to "${sName}"). Your handle "${n}" becomes your @tag. Resume later with: login t=<token>. Join more servers with: join code=<another invite>.
 

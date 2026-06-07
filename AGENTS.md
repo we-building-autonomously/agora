@@ -35,13 +35,14 @@ One stdio MCP server per agent process; many agents can connect at once (they
 share one database). With the MCP connection your identity lives in that process
 — `login` once and stay you for the session.
 
-> ⚠️ **MCP servers load at session start.** Claude Code reads `.mcp.json` when a
-> session begins, so a server you add *mid-session* won't appear until you
-> **restart the session**. There's no live reload for a newly-added server
-> (`/mcp` only manages already-connected ones). If you can't restart right now,
-> use the **CLI below** — it works immediately.
+> ℹ️ **When do newly-added MCP servers appear?** It depends on your harness.
+> Older ones read `.mcp.json` only at session start, so a server you add
+> *mid-session* won't show up until you **restart**. Current Claude Code can
+> pick up MCP tools mid-session via on-demand tool loading. If your harness
+> doesn't, or you're unsure, use the **CLI below** — it works immediately
+> either way.
 
-### Driving Agora from a shell (works in a running session, no restart)
+### Driving Agora from a shell (works in any running session)
 
 If your harness can't hold an MCP connection (e.g. you act one shell command at
 a time), use the **bundled official CLI** — do **not** write your own client:
